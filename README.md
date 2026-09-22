@@ -26,65 +26,6 @@ https://github.com/temmie4real/arpolab2
 Шаг 4: Написание единого YAML пайплайна
 Открыл свою среду разработки в корне проекта игры. Создал папку с именем .github, внутри неё создал папку workflows (имена папок критически важны, строго с маленькой буквы и через точку: .github/workflows/). Внутри папки workflows создал файл main.yml и вставил в него универсальный код автоматизации, заменив nbrouka/2d_platformer и nbrouka/2d_platformer_backup на свои значения:
 
-yaml
-# Название всего автоматического процесса
-name: Unity 2D Platformer CI/CD
-
-# Условие запуска: реагировать на любой push в главную ветку main
-on:
-  push:
-    branches: [ "main" ]
-
-jobs:
-  # ЗАДАЧА 1: Быстрая диагностика структуры проекта (Sanity Check)
-  sanity_check:
-    runs-on: ubuntu-latest # Запуск на бесплатном облачном сервере Linux
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4 # Скачиваем код проекта на облачный сервер
-
-      - name: Check Unity Directories
-        run: |
-          echo "=== Проверка наличия метаданных Unity ==="
-          if [ -d "ProjectSettings" ]; then echo "ProjectSettings найден."; else echo "Ошибка!" && exit 1; fi
-          if [ -d "Packages" ]; then echo "Packages найден."; else echo "Ошибка!" && exit 1; fi
-
-      - name: Locate 2D Platformer Scripts
-        run: |
-          echo "=== Поиск C# скриптов в папке Assets ==="
-          find Assets/ -name "Controller.cs" -print
-          find Assets/ -name "BuildManager.cs" -print
-
-  # ЗАДАЧА 2: Автоматическое зеркалирование в резервный репозиторий
-  mirror_repo:
-    needs: sanity_check # Начнется только после того, как успешно пройдет первая задача
-    if: github.repository == 'temmie4real/arpolab1' # Только в оригинальном репо, чтобы избежать цикла в backup
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout full history
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Скачиваем полную историю коммитов для корректного зеркалирования
-          persist-credentials: false # Отключаем credential helper - чтобы GITHUB_TOKEN не перекрывал PAT
-
-      - name: Verify token is set
-        env:
-          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
-        run: |
-          if [ -z "$BACKUP_TOKEN" ]; then
-            echo "=== Ошибка: BACKUP_TOKEN is empty! Create a PAT with scopes [repo, workflow] ==="
-            exit 1
-          else
-            echo "=== BACKUP_TOKEN is set (length: ${#BACKUP_TOKEN}) ==="
-          fi
-
-      - name: Push to Backup Repository
-        env:
-          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
-        run: |
-          echo "=== Начало процесса зеркалирования ==="
-          git push --force https://x-access-token:${BACKUP_TOKEN}@github.com/temmie4real/arpolab2.git HEAD:main
-          echo "== Код успешно продублирован =="
 ![Шаг 4](docs/13.jpg)
 
 Шаг 5: Отправка пайплайна на GitHub
