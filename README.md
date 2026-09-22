@@ -1,99 +1,116 @@
-# Лабораторная работа №1. Автоматическая сборка Unity-проекта через CLI
+Лабораторная работа №2. Настройка CI/CD пайплайна на GitHub Actions
+Студент: Сергей Шнитко
+Репозиторий: https://github.com/temmie4real/arpolab1
 
-**Студент:** Сергей Шнитко
-**Репозиторий:** https://github.com/temmie4real/arpolab1
+Цель работы
+Изучение принципов построения декларативных сценариев непрерывной интеграции (CI) на платформе GitHub Actions. Приобретение навыков автоматизации процессов верификации структуры проекта (Sanity Check), безопасного управления секретами репозитория и настройки процессов автоматического зеркалирования исходного кода в резервную инфраструктуру.
 
-## Цель работы
+Ход работы
+Шаг 1: Создание резервного репозитория для зеркалирования
+Зайдя на свой GitHub, создал второй, пустой репозиторий и назвал его arpolab2. При создании не добавлял файлы README или .gitignore, чтобы GitHub Actions мог беспрепятственно зеркалировать туда код. Скопировал URL-адрес резервного репозитория.
 
-Освоить автоматическую сборку Unity-проекта под WebGL через интерфейс командной строки (CLI), настроить `.gitignore`, оформить процесс через Git и pull request.
+https://docs/10.jpg
 
-## Ход работы
+Шаг 2: Генерация токена доступа (PAT Token)
+В правом верхнем углу GitHub нажал на своё фото профиля → Settings. В самом низу левого меню выбрал Developer settings. Перешёл в Personal access tokens → Tokens (classic). Нажал Generate new token (classic). Написал название Backup-Token и поставил галочки напротив пунктов repo (доступ к репозиториям) и workflow. Нажал Generate token внизу страницы и обязательно скопировал появившийся длинный буквенно-цифровой код (он показывается только один раз).
 
-### Шаг 1: Инициализация проекта
+https://docs/11.jpg
 
-Запустил Unity Hub, создал новый проект на базе официального шаблона **2D Platformer Microgame**. Открыл проект в Unity, перешёл в папку `Assets/Scenes/` и убедился, что основная сцена игры добавлена и активна в окне `File → Build Settings`. Запустил проект средствами Unity, изучил структуру и исходный код.
+Шаг 3: Сохранение токена в секреты основного проекта
+Перешёл на страницу основного репозитория arpolab1. Открыл вкладку Settings (верхняя панель). В левом меню развернул вкладку Secrets and variables и нажал Actions. Нажал большую зелёную кнопку New repository secret. В поле Name ввёл строго заглавными буквами: BACKUP_TOKEN. В поле Value вставил скопированный на Шаге 2 длинный токен. Нажал Add secret.
 
-![Шаг 1](docs/1.jpg)
+https://docs/12.jpg
 
-### Шаг 2: Создание C# скрипта сборщика
+Шаг 4: Написание единого YAML пайплайна
+Открыл свою среду разработки в корне проекта игры. Создал папку с именем .github, внутри неё создал папку workflows (имена папок критически важны, строго с маленькой буквы и через точку: .github/workflows/). Внутри папки workflows создал файл main.yml и вставил в него универсальный код автоматизации, заменив nbrouka/2d_platformer и nbrouka/2d_platformer_backup на свои значения:
 
-В окне Project внутри папки `Assets` создал новую папку с именем `Editor`. Внутри `Assets/Editor/` создал новый C# скрипт `BuildManager.cs` и заменил его содержимое кодом из методички: класс `BuildManager` с методом `BuildWebGL()`, вспомогательным методом `GetScenes()` и `ExitWithCode()`.
+yaml
+# Название всего автоматического процесса
+name: Unity 2D Platformer CI/CD
 
-![Шаг 2](docs/2.jpg)
+# Условие запуска: реагировать на любой push в главную ветку main
+on:
+  push:
+    branches: [ "main" ]
 
-### Шаг 3: Отключение сжатия для WebGL
+jobs:
+  # ЗАДАЧА 1: Быстрая диагностика структуры проекта (Sanity Check)
+  sanity_check:
+    runs-on: ubuntu-latest # Запуск на бесплатном облачном сервере Linux
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # Скачиваем код проекта на облачный сервер
 
-В Unity перешёл в `Edit → Project Settings → Player`. Выбрал вкладку с иконкой планеты/HTML5 (настройки WebGL). Развернул подраздел `Publishing Settings` и переключил `Compression Format` со значения `Gzip` на `Disabled`. Сохранил проект (Ctrl + S) и полностью закрыл редактор Unity.
+      - name: Check Unity Directories
+        run: |
+          echo "=== Проверка наличия метаданных Unity ==="
+          if [ -d "ProjectSettings" ]; then echo "ProjectSettings найден."; else echo "Ошибка!" && exit 1; fi
+          if [ -d "Packages" ]; then echo "Packages найден."; else echo "Ошибка!" && exit 1; fi
 
-![Шаг 3](docs/3.jpg)
+      - name: Locate 2D Platformer Scripts
+        run: |
+          echo "=== Поиск C# скриптов в папке Assets ==="
+          find Assets/ -name "Controller.cs" -print
+          find Assets/ -name "BuildManager.cs" -print
 
-### Шаг 4: Проверка скрипта через интерфейс Unity
+  # ЗАДАЧА 2: Автоматическое зеркалирование в резервный репозиторий
+  mirror_repo:
+    needs: sanity_check # Начнется только после того, как успешно пройдет первая задача
+    if: github.repository == 'temmie4real/arpolab1' # Только в оригинальном репо, чтобы избежать цикла в backup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Скачиваем полную историю коммитов для корректного зеркалирования
+          persist-credentials: false # Отключаем credential helper - чтобы GITHUB_TOKEN не перекрывал PAT
 
-Вернулся в редактор Unity, дождался компиляции проекта. Убедился, что в верхнем меню появился новый кастомный пункт, и что в `File → Build Settings` добавлена хотя бы одна сцена игры.
+      - name: Verify token is set
+        env:
+          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
+        run: |
+          if [ -z "$BACKUP_TOKEN" ]; then
+            echo "=== Ошибка: BACKUP_TOKEN is empty! Create a PAT with scopes [repo, workflow] ==="
+            exit 1
+          else
+            echo "=== BACKUP_TOKEN is set (length: ${#BACKUP_TOKEN}) ==="
+          fi
 
-![Шаг 4](docs/4.jpg)
+      - name: Push to Backup Repository
+        env:
+          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
+        run: |
+          echo "=== Начало процесса зеркалирования ==="
+          git push --force https://x-access-token:${BACKUP_TOKEN}@github.com/temmie4real/arpolab2.git HEAD:main
+          echo "== Код успешно продублирован =="
+https://docs/13.jpg
 
-### Шаг 5: Локальная сборка через терминал (CLI)
+Шаг 5: Отправка пайплайна на GitHub
+Сохранил файл main.yml (Ctrl + S), создал новую ветку LR2 и добавил изменения в git:
 
-Полностью закрыл редактор Unity. Открыл консоль (cmd) в корневой папке проекта и выполнил команду автоматической сборки:
+git checkout -b LR2
+git add .github/workflows/main.yml
+git commit -m "feat: added CI/CD pipeline with sanity check and mirroring"
+git push origin LR2
 
-    "D:\Unity versions\6000.3.10f1\Editor\Unity.exe" -batchmode -nographics -executeMethod BuildManager.BuildWebGL -quit -logFile build_webgl.log -projectPath "D:/programing_ucheba/sem7/unity/lab1arpo"
+Зайдя в репозиторий на GitHub, нажал кнопку Compare & pull request. Создал PR, где base: main, а compare: LR2. После проверки нажал кнопку Merge pull request прямо на GitHub, объединив код LR2 с веткой main.
 
-Процесс шёл в фоне 1–3 минуты.
+https://docs/14.jpg
 
-![Шаг 5](docs/5.jpg)
+Шаг 6: Проверка результатов и отчёт
+Открыл основной репозиторий на сайте GitHub и перешёл во вкладку Actions. Увидел запущенный рабочий процесс Unity 2D Platformer CI/CD. Кликнул по нему — там отображаются две зелёные галочки напротив задач sanity_check и mirror_repo.
 
-### Шаг 6: Анализ результатов и логов сборки
+https://docs/15.jpg
 
-Убедился, что в корне проекта появился файл `build_webgl.log`. Открыл его и нашёл в самом конце строку:
+Зайдя в резервный репозиторий arpolab2, обнаружил, что он перестал быть пустым — GitHub Actions сам полностью скопировал туда весь код, структуру папок и историю коммитов.
 
-    [CI/CD] УСПЕХ! WebGL билд успешно создан.
+https://docs/16.jpg
 
-Также убедился, что в папке `Builds/WebGL/` появились скомпилированные веб-файлы игры: `index.html`, папки `Build` и `StreamingAssets`.
+Обновил файл README.md в основном репозитории, дополнив его шагами из ЛР№2 и скриншотами. Зафиксировал отчёт в истории Git отдельным коммитом и отправил в ветку main:
 
-![Шаг 6](docs/6.jpg)
+git add README.md
+git commit -m "docs: Lab report #2 added"
+git push origin main
 
-### Шаг 7: Проверка работоспособности (локальный запуск)
-
-Открыл папку `Builds/WebGL/` в VS Code. Запустил расширение Live Server (кнопка Go Live в правом нижнем углу VS Code). Браузер автоматически открыл страницу `http://127.0.0.1:5500`. Проверил игру вручную: полоса загрузки Unity дошла до конца, главный экран микроигры отображается корректно, персонаж реагирует на управление.
-
-![Шаг 7](docs/7.jpg)
-
-### Шаг 8: Настройка Git и публикация
-
-Создал в корневой директории файл `.gitignore`. Инициализировал репозиторий и зафиксировал базовое состояние проекта (чистый шаблон игры без `BuildManager.cs`, для этого временно переместил файл из каталога проекта, чтобы он не попал в ветку `main`):
-
-    git init
-    git branch -M main
-    git add .
-    git commit -m "chore: initializing a 2D Platformer Microgame project"
-
-Привязал удалённый репозиторий GitHub и отправил ветку:
-
-    git remote add origin https://github.com/temmie4real/arpolab1.git
-    git push -u origin main
-
-Переключился на новую ветку (вернул скрипт `BuildManager.cs` в папку проекта) и добавил изменения в git:
-
-    git checkout -b LR1
-    git add Assets/Editor/BuildManager.cs
-    git commit -m "feat: added BuildManager script for build automation"
-    git push origin LR1
-
-![Шаг 8](docs/8.jpg)
-
-### Шаг 9: Документирование, создание Pull Request и Peer Review
-
-Создал в корне проекта файл `README.md` с отчётом и скриншотами. Зафиксировал отчёт в истории Git отдельным коммитом и отправил в ветку `LR1`:
-
-    git add README.md
-    git commit -m "docs: Lab report #1 added"
-    git push origin LR1
-
-Зайдя в репозиторий на GitHub, нажал кнопку **Compare & pull request**. Создал PR, где `base: main`, а `compare: LR1`. В правой колонке открывшегося PR в пункте **Reviewers** указал GitHub-ники двух одногруппников и отправил им ссылки на PR с просьбой проверки. После получения двух Approve нажал кнопку **Merge pull request** прямо на GitHub, объединив код `LR1` с веткой `main`.
-
-![Шаг 9](docs/9.jpg)
-
-## Выводы
-
-В ходе работы освоил автоматическую сборку Unity-проекта под WebGL через CLI, настройку параметров сборки через `BuildPlayerOptions`, работу с `.gitignore`, процесс code review через GitHub.
+Выводы
+В ходе работы освоил построение декларативных CI-сценариев на GitHub Actions, настройку триггеров и зависимостей между задачами (needs), безопасное управление секретами через Repository Secrets, а также автоматическое зеркалирование исходного кода в резервный репозиторий с использованием Personal Access Token.
